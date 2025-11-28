@@ -1,0 +1,190 @@
+#include <mcp2515.h>
+#include <SPI.h>
+#include "BluetoothSerial.h"
+
+BluetoothSerial SerialBT;
+struct can_frame canMsg; 
+MCP2515 mcp2515(5);      //Changed for esp32
+
+void setup() {
+  Serial.begin(115200);
+  SerialBT.begin("ESP32_CAN");
+  Serial.println("Bluetooth Started. Pair with 'ESP32_CAN'");
+
+  mcp2515.reset();
+  mcp2515.setBitrate(CAN_500KBPS,MCP_8MHZ); 
+  //Disable masks and filters
+  mcp2515.setFilterMask(MCP2515::MASK0, false, 0x00000000);
+  mcp2515.setFilterMask(MCP2515::MASK1, false, 0x00000000);
+  mcp2515.setFilter(MCP2515::RXF0, false, 0x00000000);
+  mcp2515.setFilter(MCP2515::RXF1, false, 0x00000000);
+  mcp2515.setFilter(MCP2515::RXF2, false, 0x00000000);
+  mcp2515.setFilter(MCP2515::RXF3, false, 0x00000000);
+  mcp2515.setFilter(MCP2515::RXF4, false, 0x00000000);
+  mcp2515.setFilter(MCP2515::RXF5, false, 0x00000000);
+
+  mcp2515.setNormalMode();
+
+  SerialBT.println("Supported PIDs: ");
+  sendOBDRequest(0x00);
+  delay(2000);
+  SerialBT.println("------------ CAN Read -------------");
+  SerialBT.println("ID  DLC   DATA");
+}
+
+void loop() {
+  //Engine-------------------------------------------
+  sendOBDRequest(0x0C); //RPM
+  delay(2000);
+  sendOBDRequest(0x11); //Throttle position
+  delay(2000);
+  sendOBDRequest(0x05); //Coolant temp
+  delay(2000);
+  sendOBDRequest(0x10); //MAF Air Flow
+  delay(2000);
+  sendOBDRequest(0x03); //Fuel System Status
+  delay(2000);
+  //Driving------------------------------------------
+  sendOBDRequest(0x0D); //Speed
+  delay(2000);
+  sendOBDRequest(0x2F); //Fuel Level--------------------------------------------------DIDNT WORK
+  delay(2000);
+  sendOBDRequest(0x42); //Battery Voltage
+  delay(2000);
+  sendOBDRequest(0x0F); //Intake temp
+  delay(2000);
+  sendOBDRequest(0x46); //Ambient temp
+  delay(2000);
+
+}
+
+void sendOBDRequest(uint8_t pid) { //Changed all serial.prints to BTserial.prints
+  // Build OBD-II PID request
+  canMsg.can_id  = 0x7DF;  // Functional addressing
+  canMsg.can_dlc = 8;
+  canMsg.data[0] = 0x02;   // Number of bytes after this one. Only increase if you want to request multiple PIDs at once                       
+  canMsg.data[1] = 0x01;   // Mode 01 - current data
+  canMsg.data[2] = pid;   // PID
+  canMsg.data[3] = 0x00;
+  canMsg.data[4] = 0x00;
+  canMsg.data[5] = 0x00;
+  canMsg.data[6] = 0x00;
+  canMsg.data[7] = 0x00;
+
+  byte result = mcp2515.sendMessage(&canMsg);
+  SerialBT.print("Request PID ");
+  SerialBT.print(pid, HEX);
+  SerialBT.print(": ");
+  SerialBT.println(result == MCP2515::ERROR_OK ? "Success" : "Fail");
+
+  unsigned long start = millis();
+
+  while (millis()-start<1000) {                             //listen for 1000ms
+    if (mcp2515.readMessage(&canMsg) == MCP2515::ERROR_OK) {  //mcp2515 reads message and stores in canMsg struct, if state is ERROR_OK (no errors) then proceed
+      if (canMsg.data[1]==0x41 && canMsg.data[2]==pid) {  //if in mode 1 and responding to requested PID
+        SerialBT.print(canMsg.can_id, HEX); //print ID
+        SerialBT.print(" ");
+        SerialBT.print(canMsg.can_dlc, HEX); //print DLC
+        SerialBT.print(" ");
+
+        for (int i =0; i < canMsg.can_dlc;i++) {
+          SerialBT.print(canMsg.data[i], HEX);
+          SerialBT.print(" ");
+        }
+
+        SerialBT.println();
+        return;
+      }
+    }
+  }
+  SerialBT.print("No response from PID");
+  SerialBT.println(pid,HEX);
+}
+
+void decode(uint32_t canId,uint8_t *data,uint8_t len) { //used PID reference chart for formulas
+  switch (canId) {
+    case 0x7E8: {//Engine Control Module
+      uint8_t mode = data[1]; //---------------------------------------do i need this
+      uint8_t pid = data[2];
+      switch (pid) {
+        case 0x0D: {//Vehicle Speed (km/h)
+          uint8_t speed = data[3];
+          SerialBT.print("Speed: "); SerialBT.print(speed); SerialBT.println(" km/h");
+          break;
+        }
+        case 0x0F: {//Intake Air Temp (C)
+          //Intake air temp = intake temp - 40 (to allow for negative temperatures)
+          int intake_temp = data[3];
+          SerialBT.print("Intake Air Temperature: "); SerialBT.print(intake_temp); SerialBT.println(" °C");
+          break;
+        }
+        case 0x0C: {//Engine RPM
+          uint8_t rpm = ((data[3] << 8) | data[4]);
+          SerialBT.print("Engine RPM: "); SerialBT.print(rpm/4); SerialBT.println(" RPM");
+          break;
+        }
+
+        case 0x10: {//MAF Air Flow Rate (g/s)
+          int maf = ((data[3] << 8) | data[4]);
+          SerialBT.print("Air Flow Rate: "); SerialBT.print(maf/100); SerialBT.println(" g/s");
+          break;
+        }
+        case 0x03: {//Fuel System Status
+          byte status = data[3];
+          SerialBT.print("Fuel System 1 Status: ");
+          if (status == 0) {
+            SerialBT.println("Not supported");
+          } else {
+            if (status & 0x01) SerialBT.println("Open loop due to insufficient engine temp"); //status is data. 0x01 checks if there is data in 0 bit
+            if (status & 0x02) SerialBT.println("Closed loop, using oxygen sensor feedback"); //0x02 checks if there is data[1] (2^1)
+            if (status & 0x04) SerialBT.println("Open loop due to engine load or enrichment"); //0x04 checks if there is data[2] (2^2)
+            if (status & 0x08) SerialBT.println("Open loop - system failure"); //0x08 checks data[3] (2^3)
+            if (status & 0x10) SerialBT.println("Closed loop, using at least one sensor but has fault");
+          }
+          byte status2 = data[4];
+          SerialBT.print("Fuel System 2 Status: ");
+          if (status2 == 0) {
+            SerialBT.println("Not supported");
+          } else {
+            if (status2 & 0x01) SerialBT.println("Open loop due to insufficient engine temp");
+            if (status2 & 0x02) SerialBT.println("Closed loop, using oxygen sensor feedback");
+            if (status2 & 0x04) SerialBT.println("Open loop due to engine load or enrichment");
+            if (status2 & 0x08) SerialBT.println("Open loop - system failure");
+            if (status2 & 0x10) SerialBT.println("Closed loop, using at least one sensor but has fault");
+          }
+          break;
+        }
+        case 0x46: {//Ambient Temp
+          //ambient temp = ambient temp - 40 (to allow for negative temperatures)
+          int amb_temp = data[3]-40;
+          SerialBT.print("Ambient Temperature: "); SerialBT.print(amb_temp); SerialBT.println(" °C");
+          break;
+        }
+        default: {
+          SerialBT.print("Unknown PID: 0x"); SerialBT.println(pid,HEX);
+        }
+      }
+    break; 
+    }
+    case 0x7E9: {//Transmission Control Module
+      uint8_t pid = data[2];
+      switch (pid) {
+        case 0x42: {//Battery Voltage
+          int battery = ((data[3] << 8) | data[4])/1000;
+          SerialBT.print("Battery Voltage: ");SerialBT.print(battery);SerialBT.println(" V");
+          break;
+        }
+        case 0x11: {//Throttle Position
+          float throttle = (data[3]*100.0)/255.0;
+          SerialBT.print("Throttle Position: "); SerialBT.print(throttle); SerialBT.println(" %");
+          break;
+        }
+        case 0x05: {//Coolant Temp
+          int cool_temp = data[3]-40;
+          SerialBT.print("Coolant Temperature: "); SerialBT.print(cool_temp); SerialBT.println(" °C");
+          break;
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,185 @@
+from kivy.app import App
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.label import Label
+from kivy.uix.boxlayout import BoxLayout
+from kivy.clock import Clock
+from kivy.graphics import Color, Line
+from datetime import datetime
+import serial
+
+# Connect to Bluetooth serial
+#try:
+bt_serial = serial.Serial('COM8', 115200, timeout=1)
+#except serial.SerialException as e:
+ #   print("Could not open COM port: ",e)
+  #  bt_serial = None
+
+# Shared dictionary to store CAN data
+can_data_dict = {
+    "RPM": "0",
+    "Throttle Position": "0",
+    "Coolant Temperature": "0",
+    "Air Flow Rate": "0",
+    "Fuel System 1 Status": "0",
+    "Fuel System 2 Status": "0",
+    "Speed": "0",
+    "Battery Voltage": "0",
+    "Intake Temperature": "0",
+    "Ambient Temperature": "0"
+}
+
+
+
+def read_serial_data(dt):
+    if bt_serial.in_waiting:
+        try:
+            line = bt_serial.readline().decode('utf-8').strip()
+            print(line)
+            if ":" in line:
+                pid, data = line.split(":", 1)
+                pid = pid.strip()
+                value = data.strip().split(" ")[0]
+            else:
+                print("Skipping line (no colon):", line)
+            #pid, data = line.split(":", 1)
+
+
+
+            match pid:
+                case "Engine RPM":
+                    can_data_dict["RPM"] = value
+                case "Throttle Position":
+                    can_data_dict["Throttle Position"] = value
+                case "Coolant Temperature":
+                    can_data_dict["Coolant Temperature"] = value
+                case "Air Flow Rate":
+                    can_data_dict["Air Flow Rate"] = value
+                case "Fuel System 1 Status":
+                    can_data_dict["Fuel System 1 Status"] = data.strip()
+                case "Fuel System 2 Status":
+                    can_data_dict["Fuel System 2 Status"] = data.strip()
+                case "Speed":
+                    can_data_dict["Speed"] = value
+                case "Battery Voltage":
+                    can_data_dict["Battery Voltage"] = value
+                case "Intake Air Temperature":
+                    can_data_dict["Intake Temperature"] = value
+                case "Ambient Temperature":
+                    can_data_dict["Ambient Temperature"] = value
+        except Exception as e:
+            print("Error reading serial:", e)
+
+
+class DashboardTile(BoxLayout):
+    def __init__(self, title, title_color=(1, 1, 1, 1), **kwargs):
+        super().__init__(orientation='vertical', padding=10, **kwargs)
+        self.title = title
+
+        with self.canvas.before:
+            Color(0.6, 0.6, 0.6, 1)
+            self.border = Line(rectangle=(self.x, self.y, self.width, self.height), width=1)
+        self.bind(pos=self.update_border, size=self.update_border)
+
+        self.title_label = Label(text=title, font_size='18sp', halign='center', bold=True, color=title_color)
+        self.data_label = Label(text="0", font_size='32sp')
+
+        self.add_widget(self.title_label)
+        self.add_widget(self.data_label)
+
+        Clock.schedule_interval(self.update_data, 1)
+
+    def update_data(self, dt):
+        value = can_data_dict.get(self.title, "0")
+        self.data_label.text = value
+
+    def update_border(self, *args):
+        self.border.rectangle = (self.x, self.y, self.width, self.height)
+
+#class FuelDashboardTile(BoxLayout):
+#    def __init__(self,title,title_color,**kwargs):
+#        super().__init__(orientation='vertical',padding=10,**kwargs)
+#        self.title = title
+
+ #       with self.canvas.before:
+  #          Color(0.6,0.6,0.6,1)
+   #         self.border = Line(rectangle=(self.x,self.y,self.width,self.height),width=1)
+    #    self.bind(pos=self.update_border,size=self.update_border)
+
+     #   self.title_label = Label(text=title, font_size='18sp', halign='center', bold=True, color=title_color)
+        #self.sys1_label = Label(text=title, font_size='18sp', halign='center', bold=True, color=title_color)
+      #  self.sys1_data = Label(text="0", font_size='32sp')
+        #self.sys2_label = Label(text=title2,font_size = '18sp',halign='center', valign='',color=(title_color))
+     #   self.ssy2_data = Label(text="0", font_size='32sp')
+
+      #  self.add_widget(self.sys1_label)
+       # self.add_widget(self.sys1_data)
+        #self.add_widget(self.sys2_label)
+       # self.add_widget(self.sys2_data)
+
+        #Clock.schedule_interval(self.update_data, 1)
+
+        #def update_data(self, dt):
+         #   value = can_data_dict.get(self.title, "0")
+          #  self.sys1_data.text = value
+           # self.sys2_data.text = value
+
+      #  def update_border(self, *args):
+       #     self.border.rectangle = (self.x, self.y, self.width, self.height)
+
+#class ClockDashboardTile(BoxLayout):
+#    def __init__(self, title, title_color, **kwargs):
+ #       super().__init__(orientation='vertical', padding=10, **kwargs)
+
+   #     with self.canvas.before:
+    #        Color(0.6, 0.6, 0.6, 1)
+       #     self.border = Line(rectangle=(self.x, self.y, self.width, self.height), width=1)
+       # self.bind(pos=self.update_border, size=self.update_border)
+
+        #self.title_label = Label(text=title, font_size='18sp', halign='center', bold=True, color=title_color)
+        #self.datetime_label = Label(text="", font_size='18sp', bold=True, halign='center')
+
+       # self.title_label.bind(size=self.datetime_label.setter('text_size'))
+       # self.datetime_label.bind(size=self.datetime_label.setter('text_size'))
+
+        #self.add_widget(self.title_label)
+        #self.add_widget(self.datetime_label)
+
+        #Clock.schedule_interval(self.update_time, 1)
+
+  #  def update_border(self, *args):
+   #     self.border.rectangle = (self.x, self.y, self.width, self.height)
+
+    #def update_time(self, dt):
+     #   now = datetime.now()
+      #  self.datetime_label.text = now.strftime("%A,\n%b %d %Y\n%I:%M:%S %p\n\n")
+
+
+class CANBusDashboard(GridLayout):
+    def __init__(self, **kwargs):
+        color1 = (1, 0, 0, 1)
+        color2 = (0, 0, 1, 1)
+        super().__init__(cols=5, padding=10, spacing=13, **kwargs)
+
+        self.add_widget(DashboardTile("RPM", title_color=color1))
+        self.add_widget(DashboardTile("Throttle Position", title_color=color1))
+        self.add_widget(DashboardTile("Coolant Temperature", title_color=color1))
+        self.add_widget(DashboardTile("Fuel System 1 Status", title_color=color1))
+        self.add_widget(DashboardTile("Fuel System 2 Status", title_color=color1))
+        self.add_widget(DashboardTile("Air Flow Rate", title_color=color1))
+
+        self.add_widget(DashboardTile("Speed", title_color=color2))
+        self.add_widget(DashboardTile("Battery Voltage", title_color=color2))
+        self.add_widget(DashboardTile("Intake Temperature", title_color=color2))
+        self.add_widget(DashboardTile("Ambient Temperature", title_color=color2))
+
+   #     self.add_widget(ClockDashboardTile("Clock", title_color=(1, 0, 1, 1)))
+
+
+class MyApp(App):
+    def build(self):
+        Clock.schedule_interval(read_serial_data, 0.5)
+        return CANBusDashboard()
+
+
+if __name__ == '__main__':
+    MyApp().run()
